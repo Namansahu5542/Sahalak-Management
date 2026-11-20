@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "paths": {
+      "@/auth": ["./auth.js"],
       "@/*": ["./src/*"]
     }
   }

@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Hero() {
     return (
         <section className="hero" aria-labelledby="hero-title">
@@ -11,8 +13,8 @@ export default function Hero() {
                         share the details, and find the right help—or discover your next local opportunity.
                     </p>
                     <div className="actions">
-                        <a className="primary" href="#businesses">Find a worker <span aria-hidden="true">→</span></a>
-                        <a className="watch" href="#workers"><span className="play" aria-hidden="true">↗</span> Find work</a>
+                        <Link className="primary" href="#businesses">Find a worker <span aria-hidden="true">→</span></Link>
+                        <Link className="watch" href="#workers"><span className="play" aria-hidden="true">↗</span> Find work</Link>
                     </div>
                     <div className="hero-proof"><span>✓</span> Short shifts and longer roles, all in one place</div>
                 </div>

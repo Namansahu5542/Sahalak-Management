@@ -1,3 +1,4 @@
+import Link from "next/link";
 export default function Header() {
     return (
         <header className="topbar">
@@ -5,13 +6,13 @@ export default function Header() {
                 <span className="brand-mark">S</span>Sahalak
             </a>
             <nav className="nav" aria-label="Main navigation">
-                <a href="#journey">How it works</a>
-                <a href="#businesses">For businesses</a>
-                <a href="#workers">For workers</a>
+                <Link href="#journey">How it works</Link>
+                <Link href="#businesses">For businesses</Link>
+                <Link href="#workers">For workers</Link>
             </nav>
             <div className="auth">
-                <a className="login" href="#login">Log in</a>
-                <a className="signup" href="#signup">Sign up</a>
+                <Link className="login" href="./choose-role/login">Log in</Link>
+                <Link className="signup" href="./choose-role/signup">Sign up</Link>
             </div>
             <details className="mobile-menu">
                 <summary aria-label="Open menu">☰</summary>
