@@ -3,6 +3,7 @@ import { proxy as auth } from "@/app/lib/auth/proxy";
 
 export default auth((request) => {
   const isProtected =
+    request.nextUrl.pathname.startsWith("/owner/setup") ||
     request.nextUrl.pathname.startsWith("/owner/dashboard") ||
     request.nextUrl.pathname.startsWith("/worker/dashboard") ||
     request.nextUrl.pathname.startsWith("/dashboard");
@@ -15,5 +16,5 @@ export default auth((request) => {
 });
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/owner/dashboard/:path*", "/worker/dashboard/:path*"],
+  matcher: ["/owner/setup/:path*", "/dashboard/:path*", "/owner/dashboard/:path*", "/worker/dashboard/:path*"],
 };
