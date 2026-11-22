@@ -4,7 +4,7 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
-const fieldClass = "mt-1.5 h-11 w-full rounded-xl border border-[#6C5636] bg-[#090907]/80 px-3.5 text-sm text-[#F5F3EF] outline-none placeholder:text-[#F5F3EF]/35 focus:border-[#B99D73] focus:ring-2 focus:ring-[#B99D73]/20";
+const fieldClass = "mt-1.6 h-11 w-full rounded-xl border border-[#6C5636] bg-[#090907]/80 px-3.5 text-sm text-[#F5F3EF] outline-none placeholder:text-[#F5F3EF]/35 focus:border-[#B99D73] focus:ring-2 focus:ring-[#B99D73]/20";
 
 async function readJson(response) {
   return response.json().catch(() => ({}));
