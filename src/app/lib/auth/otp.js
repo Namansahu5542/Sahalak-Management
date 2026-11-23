@@ -1,7 +1,7 @@
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 
 function getOtpSecret() {
-  const secret = process.env.AUTH_SECRET || process.env.BETTER_AUTH_SECRET;
+  const secret = process.env.AUTH_SECRET ;
   if (!secret) throw new Error("Missing AUTH_SECRET for email verification");
   return secret;
 }

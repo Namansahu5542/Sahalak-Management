@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { connectMongoose } from "@/app/lib/db/mongoose";
-import User from "@/app/lib/models/User";
-import PendingSignup from "@/app/lib/models/PendingSignup";
+import { sql } from "@/app/lib/db";
 import { isOtpMatch } from "@/app/lib/auth/otp";
 
 function validOrigin(request) {
@@ -32,31 +30,30 @@ export async function POST(request) {
   }
 
   try {
-    await connectMongoose();
-    await Promise.all([User.init(), PendingSignup.init()]);
-    const signup = await PendingSignup.findOne({ email });
+    const [signup] = await sql`select * from pending_signups where email = ${email} limit 1`;
     if (!signup || signup.expiresAt <= new Date() || signup.attempts >= 5) {
       return NextResponse.json({ error: "This code has expired or cannot be used. Request a new code." }, { status: 400 });
     }
 
     if (!isOtpMatch(email, otp, signup.otpDigest)) {
-      await PendingSignup.updateOne({ _id: signup._id, attempts: { $lt: 5 } }, { $inc: { attempts: 1 } });
+      await sql`update pending_signups set attempts = attempts + 1 where id = ${signup.id} and attempts < 5`;
       return NextResponse.json({ error: "That code does not match. Check it and try again." }, { status: 400 });
     }
 
-    await User.create({
-      name: signup.name,
-      email,
-      passwordHash: signup.passwordHash,
-      role: signup.role === "owner" ? "owner" : "user",
-      emailVerifiedAt: new Date(),
-      createdAt: new Date(),
+    const role = signup.role === "owner" ? "owner" : "user";
+    await sql.begin(async (tx) => {
+      await tx`
+        insert into users (name, email, password_hash, role, email_verified_at)
+        values (${signup.name}, ${email}, ${signup.passwordHash}, ${role}, now())`;
+      await tx`delete from pending_signups where id = ${signup.id}`;
     });
-    await PendingSignup.deleteOne({ _id: signup._id });
+
     return NextResponse.json({ message: "Email verified. Your account is ready." });
   } catch (error) {
-    if (error?.code === 11000) return NextResponse.json({ error: "An account with this email already exists. Try logging in instead." }, { status: 409 });
-    const errorMessage = String(error?.message || "").replace(/mongodb(?:\+srv)?:\/\/\S+/gi, "[database URI]");
+    if (error?.code === "23505") {
+      return NextResponse.json({ error: "An account with this email already exists. Try logging in instead." }, { status: 409 });
+    }
+    const errorMessage = String(error?.message || "").replace(/postgres(?:ql)?:\/\/\S+/gi, "[database URL]");
     console.error("Signup code verification failed", { name: error?.name, code: error?.code, message: errorMessage });
     const message = process.env.NODE_ENV === "development"
       ? `Verification is temporarily unavailable (${error?.name || "UnknownError"}). Check the terminal log.`

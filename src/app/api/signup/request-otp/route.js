@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { connectMongoose } from "@/app/lib/db/mongoose";
-import User from "@/app/lib/models/User";
-import PendingSignup from "@/app/lib/models/PendingSignup";
+import { sql } from "@/app/lib/db";
 import { hashPassword } from "@/app/lib/auth/password";
 import { createOtp, digestOtp } from "@/app/lib/auth/otp";
 
@@ -42,35 +40,36 @@ export async function POST(request) {
   }
 
   try {
-    await connectMongoose();
-    await Promise.all([User.init(), PendingSignup.init()]);
-    if (await User.exists({ email })) {
+    // Postgres has no automatic expiry like MongoDB's TTL index, so clean up here.
+    await sql`delete from pending_signups where expires_at < now()`;
+
+    const [existingUser] = await sql`select 1 as found from users where email = ${email} limit 1`;
+    if (existingUser) {
       return NextResponse.json({ error: "An account with this email already exists. Try logging in instead." }, { status: 409 });
     }
 
-    const previous = await PendingSignup.findOne({ email }).lean();
+    const [previous] = await sql`select updated_at from pending_signups where email = ${email} limit 1`;
     if (previous && Date.now() - previous.updatedAt.getTime() < 60_000) {
       return NextResponse.json({ error: "Please wait a minute before requesting another code." }, { status: 429 });
     }
 
     const otp = createOtp();
     const now = new Date();
-    await PendingSignup.findOneAndUpdate(
-      { email },
-      {
-        $set: {
-          name,
-          email,
-          role,
-          passwordHash: await hashPassword(password),
-          otpDigest: digestOtp(email, otp),
-          attempts: 0,
-          updatedAt: now,
-          expiresAt: new Date(now.getTime() + 10 * 60_000),
-        },
-      },
-      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
-    );
+    const expiresAt = new Date(now.getTime() + 10 * 60_000);
+    const passwordHash = await hashPassword(password);
+    const otpDigest = digestOtp(email, otp);
+
+    await sql`
+      insert into pending_signups (email, name, role, password_hash, otp_digest, attempts, updated_at, expires_at)
+      values (${email}, ${name}, ${role}, ${passwordHash}, ${otpDigest}, 0, ${now}, ${expiresAt})
+      on conflict (email) do update set
+        name = excluded.name,
+        role = excluded.role,
+        password_hash = excluded.password_hash,
+        otp_digest = excluded.otp_digest,
+        attempts = 0,
+        updated_at = excluded.updated_at,
+        expires_at = excluded.expires_at`;
 
     const emailResponse = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -85,14 +84,14 @@ export async function POST(request) {
     });
 
     if (!emailResponse.ok) {
-      await PendingSignup.deleteOne({ email });
+      await sql`delete from pending_signups where email = ${email}`;
       console.error("Email provider rejected signup verification request", emailResponse.status);
       return NextResponse.json({ error: "We could not send the verification code. Please try again shortly." }, { status: 502 });
     }
 
     return NextResponse.json({ message: "Verification code sent. Check your inbox." });
   } catch (error) {
-    const errorMessage = String(error?.message || "").replace(/mongodb(?:\+srv)?:\/\/\S+/gi, "[database URI]");
+    const errorMessage = String(error?.message || "").replace(/postgres(?:ql)?:\/\/\S+/gi, "[database URL]");
     console.error("Signup verification request failed", { name: error?.name, code: error?.code, message: errorMessage });
     const message = process.env.NODE_ENV === "development"
       ? `Signup is temporarily unavailable (${error?.name || "UnknownError"}). Check the terminal log.`

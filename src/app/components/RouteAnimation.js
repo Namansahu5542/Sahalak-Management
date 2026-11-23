@@ -86,7 +86,7 @@ export default function RouteAnimation() {
       <desc id="route-desc">A person moves along a glowing curved path and reaches a shop location marker.</desc>
 
       {/* static glow (rasterised once, never re-filtered) */}
-      <path d={ROUTE} className="fill-none stroke-[#D4FF3F]/25 [stroke-width:14] [stroke-linecap:round] [filter:blur(8px)]" />
+      <path d={ROUTE} className="fill-none stroke-[#D4FF3F]/25 stroke-14 [stroke-linecap:round] [filter:blur(8px)]" />
       <path ref={routeRef} d={ROUTE} className="fill-none stroke-[#D4FF3F]/50 [stroke-width:3] [stroke-dasharray:3_12] [stroke-linecap:round]" />
       <path
         ref={progressRef}

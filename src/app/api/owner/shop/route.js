@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server";
 import { auth, unstable_update } from "@/app/lib/auth/auth";
-import { connectMongoose } from "@/app/lib/db/mongoose";
-import ShopDetails from "@/app/lib/models/ShopDetails";
-import User from "@/app/lib/models/User";
+import { sql } from "@/app/lib/db";
 import { shopSetupSchema } from "@/app/lib/validation/shop";
+
+const CONNECTION_ERRORS = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "ETIMEDOUT",
+  "CONNECT_TIMEOUT",
+  "CONNECTION_CLOSED",
+  "CONNECTION_DESTROYED",
+  "CONNECTION_ENDED",
+]);
 
 function isSameOrigin(request) {
   const origin = request.headers.get("origin");
@@ -53,45 +61,42 @@ export async function POST(request) {
     return NextResponse.json({ error: "The uploaded file does not match its image type.", fieldErrors: { photo: "Choose a valid JPG, PNG, or WebP image." } }, { status: 400 });
   }
 
-  const now = new Date();
-  const image = {
-    data: imageBytes,
-    contentType: detectedType,
-    fileName: photo.name.split(/[\\/]/).pop().slice(0, 100),
-    size: imageBytes.length,
-  };
   const email = session.user.email.trim().toLowerCase();
-  const shop = {
-    ownerId: session.user.id,
-    ownerEmail: email,
-    ownerName: session.user.name || "",
-    shopName: parsed.data.shopName,
-    marketName: parsed.data.marketName,
-    address: parsed.data.address,
-    category: parsed.data.category,
-    phone: parsed.data.phone,
-    image,
-    updatedAt: now,
-  };
+  const ownerName = session.user.name || "";
+  const fileName = photo.name.split(/[\\/]/).pop().slice(0, 100);
+  const { shopName, marketName, address, category, phone } = parsed.data;
 
   try {
-    await connectMongoose();
-    await ShopDetails.init();
-    await User.init();
-    await ShopDetails.findOneAndUpdate(
-      { ownerEmail: email },
-      { $set: shop },
-      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: false },
-    );
+    await sql.begin(async (tx) => {
+      // GitHub sign-ins have no users row yet, so create it (or update the existing one) and get its id.
+      const [owner] = await tx`
+        insert into users (email, name, role, owner_activated_at)
+        values (${email}, ${ownerName}, 'owner', now())
+        on conflict (email) do update set role = 'owner', owner_activated_at = now()
+        returning id`;
 
-    await User.updateOne(
-      { email },
-      {
-        $set: { role: "owner", ownerActivatedAt: now },
-        $setOnInsert: { email, name: session.user.name || "", createdAt: now },
-      },
-      { upsert: true, runValidators: true, setDefaultsOnInsert: false },
-    );
+      await tx`
+        insert into shops (
+          owner_id, owner_name, shop_name, market_name, address, category, phone,
+          image_data, image_content_type, image_file_name, image_size, updated_at
+        )
+        values (
+          ${owner.id}, ${ownerName}, ${shopName}, ${marketName}, ${address}, ${category}, ${phone},
+          ${imageBytes}, ${detectedType}, ${fileName}, ${imageBytes.length}, now()
+        )
+        on conflict (owner_id) do update set
+          owner_name = excluded.owner_name,
+          shop_name = excluded.shop_name,
+          market_name = excluded.market_name,
+          address = excluded.address,
+          category = excluded.category,
+          phone = excluded.phone,
+          image_data = excluded.image_data,
+          image_content_type = excluded.image_content_type,
+          image_file_name = excluded.image_file_name,
+          image_size = excluded.image_size,
+          updated_at = now()`;
+    });
 
     try {
       await unstable_update({ user: { role: "owner" } });
@@ -99,18 +104,21 @@ export async function POST(request) {
       console.error("Shop was saved but the owner session refresh failed", sessionError?.name || "UnknownError");
     }
 
-    return NextResponse.json({ message: "Shop details saved.", shopName: shop.shopName });
+    return NextResponse.json({ message: "Shop details saved.", shopName });
   } catch (error) {
-    if (error?.code === 11000) return NextResponse.json({ error: "A shop profile is already linked to this account." }, { status: 409 });
-    const errorName = error?.name || "UnknownError";
-    const safeMessage = String(error?.message || "").replace(/mongodb(?:\+srv)?:\/\/\S+/gi, "[database URI]");
-    console.error("Could not save owner shop details", { name: errorName, message: safeMessage, code: error?.code });
-    if (errorName === "ValidationError") return NextResponse.json({ error: "Some shop details did not pass database validation. Review the form." }, { status: 400 });
-    if (errorName.includes("ServerSelection") || errorName.includes("MongoNetwork") || errorName.includes("MongooseServerSelection")) {
-      return NextResponse.json({ error: "Could not connect to MongoDB. Check the database URI, network access list, and credentials." }, { status: 503 });
+    const code = error?.code || "";
+    const safeMessage = String(error?.message || "").replace(/postgres(?:ql)?:\/\/\S+/gi, "[database URL]");
+    console.error("Could not save owner shop details", { name: error?.name, code, message: safeMessage });
+
+    if (code === "23505") return NextResponse.json({ error: "A shop profile is already linked to this account." }, { status: 409 });
+    if (code === "23514" || code === "23502" || code === "22001") {
+      return NextResponse.json({ error: "Some shop details did not pass database validation. Review the form." }, { status: 400 });
+    }
+    if (CONNECTION_ERRORS.has(code)) {
+      return NextResponse.json({ error: "Could not connect to the database. Check DATABASE_URL, your network, and the database status." }, { status: 503 });
     }
     const message = process.env.NODE_ENV === "development"
-      ? `Shop details could not be saved (${errorName}). Check the terminal log for details.`
+      ? `Shop details could not be saved (${error?.name || "UnknownError"}). Check the terminal log for details.`
       : "Could not save your shop details right now. Please try again.";
     return NextResponse.json({ error: message }, { status: 500 });
   }

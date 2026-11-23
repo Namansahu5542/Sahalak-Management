@@ -1,8 +1,7 @@
 import NextAuthImport from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import authConfig from "./auth.config.js";
-import { connectMongoose } from "@/app/lib/db/mongoose";
-import User from "@/app/lib/models/User";
+import { sql } from "@/app/lib/db";
 import { verifyPassword } from "@/app/lib/auth/password";
 
 const NextAuth =
@@ -25,11 +24,14 @@ const credentialsProvider = Credentials({
     const password = typeof credentials?.password === "string" ? credentials.password : "";
     if (!email || !password) return null;
 
-    await connectMongoose();
-    const user = await User.findOne({ email, emailVerifiedAt: { $type: "date" } }).lean();
+    const [user] = await sql`
+      select id, name, email, role, password_hash
+      from users
+      where email = ${email} and email_verified_at is not null
+      limit 1`;
     if (!user || !(await verifyPassword(password, user.passwordHash))) return null;
 
-    return { id: String(user._id), name: user.name, email: user.email, role: user.role || "user" };
+    return { id: user.id, name: user.name, email: user.email, role: user.role || "user" };
   },
 });
 
@@ -41,8 +43,7 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
     async jwt({ token, user, trigger }) {
       const email = (user?.email || (trigger === "update" ? token.email : ""))?.trim().toLowerCase();
       if (email) {
-        await connectMongoose();
-        const account = await User.findOne({ email }).select({ role: 1 }).lean();
+        const [account] = await sql`select role from users where email = ${email} limit 1`;
         token.role = account?.role || user?.role || token.role || "user";
       } else if (user?.role) {
         token.role = user.role;

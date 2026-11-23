@@ -6,7 +6,7 @@ const GitHub =
     : GitHubProvider.default || GitHubProvider["module.exports"];
 
 export default {
-  secret: process.env.AUTH_SECRET || process.env.BETTER_AUTH_SECRET,
+  secret: process.env.AUTH_SECRET ,
   providers: [
     GitHub({
       clientId: process.env.GITHUB_CLIENT_ID,
