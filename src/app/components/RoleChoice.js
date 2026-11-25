@@ -52,7 +52,7 @@ export default function RoleChoice({ mode = "signup" }) {
         className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_0%_35%,#FF2DAB26,transparent_45%),linear-gradient(90deg,#0B0B0BB3,#0B0B0B80_50%,#0B0B0BA6)]"
       />
 
-      <header className="relative z-10 mx-auto flex h-16 max-w-7xl items-center justify-between sm:h-[76px]">
+      <header className="relative z-10 mx-auto flex h-16 max-w-7xl items-center justify-between sm:h-19">
         <Link href="/" aria-label="Sahalak home" className={`inline-flex items-center gap-2.5 text-xl no-underline ${heading}`}>
           <span className="grid size-8 place-items-center rounded-[11px_11px_11px_3px] bg-[#FF2DAB] text-base text-[#0B0B0B]">S</span>
           Sahalak
@@ -64,10 +64,10 @@ export default function RoleChoice({ mode = "signup" }) {
 
       <section
         aria-labelledby="role-title"
-        className="relative z-10 mx-auto flex min-h-[calc(100svh-64px)] max-w-[900px] items-center py-4 sm:min-h-[calc(100svh-76px)]"
+        className="relative z-10 mx-auto flex min-h-[calc(100svh-64px)] max-w-225 items-center py-4 sm:min-h-[calc(100svh-76px)]"
       >
         {/* compact + transparent glass box */}
-        <div className="grid w-full overflow-hidden rounded-3xl border border-white/20 bg-white/[0.04] shadow-[0_16px_60px_#0008] backdrop-blur-[6px] md:grid-cols-[1fr_1fr]">
+        <div className="grid w-full overflow-hidden rounded-3xl border border-white/20 bg-white/4 shadow-[0_16px_60px_#0008] backdrop-blur-[6px] md:grid-cols-[1fr_1fr]">
           {/* left: story + animation */}
           <div className="flex flex-col justify-center gap-10 border-b border-white/10 p-5 md:border-b-0 md:border-r md:p-6">
             <div className="flex flex-col justify-between gap-10">
@@ -83,7 +83,7 @@ export default function RoleChoice({ mode = "signup" }) {
               </p>
             </div>
 
-            <div className="mx-auto hidden h-[150px] w-full max-w-[360px] sm:block">
+            <div className="mx-auto hidden h-37.5 w-full max-w-90 sm:block">
               <RouteAnimation />
             </div>
           </div>
@@ -105,7 +105,7 @@ export default function RoleChoice({ mode = "signup" }) {
                   <Link
                     key={role.id}
                     href={`/${mode}?role=${role.id}`}
-                    className={`group flex items-center gap-3 rounded-2xl border bg-white/[0.04] p-3.5 no-underline transition duration-200 hover:-translate-y-0.5 hover:bg-white/[0.08] ${a.card}`}
+                    className={`group flex items-center gap-3 rounded-2xl border bg-white/4 p-3.5 no-underline transition duration-200 hover:-translate-y-0.5 hover:bg-white/8 ${a.card}`}
                   >
                     <span aria-hidden="true" className={`grid size-11 shrink-0 place-items-center rounded-[13px] text-[22px] transition group-hover:scale-105 ${a.icon}`}>
                       {role.icon}

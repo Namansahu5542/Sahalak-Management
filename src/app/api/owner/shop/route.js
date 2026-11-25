@@ -12,7 +12,7 @@ const CONNECTION_ERRORS = new Set([
   "CONNECTION_DESTROYED",
   "CONNECTION_ENDED",
 ]);
-
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isSameOrigin(request) {
   const origin = request.headers.get("origin");
   try {
@@ -33,16 +33,21 @@ export async function POST(request) {
   if (!isSameOrigin(request)) return NextResponse.json({ error: "Request could not be verified." }, { status: 403 });
 
   const session = await auth();
-  if (!session?.user?.id || !session.user.email) {
-    return NextResponse.json({ error: "Sign in with an account that has an email address to continue." }, { status: 401 });
+  const userId = session?.user?.id;
+  if (!userId || !UUID_PATTERN.test(userId)) {
+    return NextResponse.json({ error: "Please sign in again to continue." }, { status: 401 });
   }
 
   let formData;
   try {
     formData = await request.formData();
   } catch {
+    if (error?.message === "USER_NOT_FOUND") {
+      return NextResponse.json({ error: "Please sign in again to continue." }, { status: 401 });
+    }
     return NextResponse.json({ error: "Submit the shop details as a form." }, { status: 400 });
   }
+
 
   const parsed = shopSetupSchema.safeParse(Object.fromEntries(formData.entries()));
   if (!parsed.success) {
@@ -61,7 +66,35 @@ export async function POST(request) {
     return NextResponse.json({ error: "The uploaded file does not match its image type.", fieldErrors: { photo: "Choose a valid JPG, PNG, or WebP image." } }, { status: 400 });
   }
 
-  const email = session.user.email.trim().toLowerCase();
+  await sql.begin(async (tx) => {
+    const updated = await tx`
+    update users set role = 'owner', owner_activated_at = now()
+    where id = ${userId}
+    returning id`;
+    if (updated.length === 0) throw new Error("USER_NOT_FOUND");
+
+    await tx`
+    insert into shops (
+      owner_id, owner_name, shop_name, market_name, address, category, phone,
+      image_data, image_content_type, image_file_name, image_size, updated_at
+    )
+    values (
+      ${userId}, ${ownerName}, ${shopName}, ${marketName}, ${address}, ${category}, ${phone},
+      ${imageBytes}, ${detectedType}, ${fileName}, ${imageBytes.length}, now()
+    )
+    on conflict (owner_id) do update set
+      owner_name = excluded.owner_name,
+      shop_name = excluded.shop_name,
+      market_name = excluded.market_name,
+      address = excluded.address,
+      category = excluded.category,
+      phone = excluded.phone,
+      image_data = excluded.image_data,
+      image_content_type = excluded.image_content_type,
+      image_file_name = excluded.image_file_name,
+      image_size = excluded.image_size,
+      updated_at = now()`;
+  });
   const ownerName = session.user.name || "";
   const fileName = photo.name.split(/[\\/]/).pop().slice(0, 100);
   const { shopName, marketName, address, category, phone } = parsed.data;
