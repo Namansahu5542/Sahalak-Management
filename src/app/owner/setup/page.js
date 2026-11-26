@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { auth } from "@/app/lib/auth/auth";
+import { connection } from "next/server";
 import OwnerSetupForm from "@/app/components/OwnerSetupForm";
 import SignupRouteAnimation from "@/app/components/SignupRouteAnimation";
 
@@ -64,55 +65,56 @@ function OwnerSetupFallback() {
 }
 
 async function OwnerSetupContent() {
+  await connection();
   const session = await auth();
   if (!session?.user) redirect("/choose-role/login?callbackUrl=%2Fowner%2Fsetup");
 
   return (
     <div className="relative z-10 px-4 py-7 sm:px-7 sm:py-10 lg:px-10 lg:py-12">
-        <div className="mx-auto max-w-375">
-          <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-[.2em] text-[#B99D73]">Owner onboarding · Step 1 of 1</p>
-              <h1 className="mb-0 text-3xl font-extrabold tracking-[-.055em] text-[#F5F3EF] sm:text-4xl">Set up your business</h1>
+      <div className="mx-auto max-w-375">
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-[.2em] text-[#B99D73]">Owner onboarding · Step 1 of 1</p>
+            <h1 className="mb-0 text-3xl font-extrabold tracking-[-.055em] text-[#F5F3EF] sm:text-4xl">Set up your business</h1>
+          </div>
+          <p className="mb-1 text-xs text-[#F5F3EF]/55">A few details help workers find the right shop.</p>
+        </div>
+
+        <section aria-label="Business setup" className="grid min-h-160 overflow-hidden rounded-[28px] border border-[#B99D73]/35 bg-[#090907]/95 shadow-[0_28px_100px_#000b] backdrop-blur-xl lg:grid-cols-[1.08fr_.92fr]">
+          <div className="p-5 sm:p-8 lg:p-10 xl:p-12">
+            <div className="mb-7 max-w-2xl">
+              <span className="mb-2 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.18em] text-[#B99D73]"><i className="h-px w-5 bg-[#6C5636]" />Your shop profile</span>
+              <h2 className="mb-1 text-xl font-bold tracking-[-.035em] text-[#F5F3EF] sm:text-2xl">Tell us about your shop</h2>
+              <p className="mb-0 text-sm text-[#F5F3EF]/55">This information helps nearby people recognize your business and reach you.</p>
             </div>
-            <p className="mb-1 text-xs text-[#F5F3EF]/55">A few details help workers find the right shop.</p>
+            <OwnerSetupForm />
           </div>
 
-          <section aria-label="Business setup" className="grid min-h-160 overflow-hidden rounded-[28px] border border-[#B99D73]/35 bg-[#090907]/95 shadow-[0_28px_100px_#000b] backdrop-blur-xl lg:grid-cols-[1.08fr_.92fr]">
-            <div className="p-5 sm:p-8 lg:p-10 xl:p-12">
-              <div className="mb-7 max-w-2xl">
-                <span className="mb-2 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.18em] text-[#B99D73]"><i className="h-px w-5 bg-[#6C5636]" />Your shop profile</span>
-                <h2 className="mb-1 text-xl font-bold tracking-[-.035em] text-[#F5F3EF] sm:text-2xl">Tell us about your shop</h2>
-                <p className="mb-0 text-sm text-[#F5F3EF]/55">This information helps nearby people recognize your business and reach you.</p>
-              </div>
-              <OwnerSetupForm />
+          <aside className="relative flex flex-col justify-between overflow-hidden border-t border-[#6C5636]/70 bg-[#6C5636]/10 p-5 sm:p-8 lg:border-l lg:border-t-0 lg:p-10 xl:p-12">
+            <div className="pointer-events-none absolute -right-20 -top-24 size-72 rounded-full bg-[#B99D73]/10 blur-3xl" />
+            <div className="relative z-10">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-[.2em] text-[#B99D73]">Made for local business</p>
+              <h2 className="mb-3 max-w-md text-3xl font-extrabold leading-[1.04] tracking-[-.055em] text-[#F5F3EF] sm:text-4xl">The right people, closer to your shop.</h2>
+              <p className="mb-0 max-w-lg text-sm leading-relaxed text-[#F5F3EF]/65">Create a clear business profile so workers can recognize your location, understand what you do, and find you when you need an extra pair of hands.</p>
             </div>
 
-            <aside className="relative flex flex-col justify-between overflow-hidden border-t border-[#6C5636]/70 bg-[#6C5636]/10 p-5 sm:p-8 lg:border-l lg:border-t-0 lg:p-10 xl:p-12">
-              <div className="pointer-events-none absolute -right-20 -top-24 size-72 rounded-full bg-[#B99D73]/10 blur-3xl" />
-              <div className="relative z-10">
-                <p className="mb-2 text-[10px] font-bold uppercase tracking-[.2em] text-[#B99D73]">Made for local business</p>
-                <h2 className="mb-3 max-w-md text-3xl font-extrabold leading-[1.04] tracking-[-.055em] text-[#F5F3EF] sm:text-4xl">The right people, closer to your shop.</h2>
-                <p className="mb-0 max-w-lg text-sm leading-relaxed text-[#F5F3EF]/65">Create a clear business profile so workers can recognize your location, understand what you do, and find you when you need an extra pair of hands.</p>
-              </div>
+            <div className="relative mx-auto my-6 h-45 w-full max-w-155 sm:h-55">
+              <SignupRouteAnimation />
+            </div>
 
-              <div className="relative mx-auto my-6 h-45 w-full max-w-155 sm:h-55">
-                <SignupRouteAnimation />
-              </div>
-
-              <div className="relative z-10 rounded-2xl border border-[#B99D73]/25 bg-[#090907]/75 p-5 shadow-[0_14px_45px_#0005] sm:p-6">
-                <div className="mb-3 flex items-center gap-3">
-                  <span className="grid size-10 place-items-center rounded-xl bg-[#6C5636]/35 text-[#B99D73]" aria-hidden="true">✦</span>
-                  <div>
-                    <p className="mb-0.5 text-[10px] font-bold uppercase tracking-[.16em] text-[#B99D73]">Your shop details</p>
-                    <h3 className="mb-0 text-base font-bold text-[#F5F3EF]">One profile, easier connections</h3>
-                  </div>
+            <div className="relative z-10 rounded-2xl border border-[#B99D73]/25 bg-[#090907]/75 p-5 shadow-[0_14px_45px_#0005] sm:p-6">
+              <div className="mb-3 flex items-center gap-3">
+                <span className="grid size-10 place-items-center rounded-xl bg-[#6C5636]/35 text-[#B99D73]" aria-hidden="true">✦</span>
+                <div>
+                  <p className="mb-0.5 text-[10px] font-bold uppercase tracking-[.16em] text-[#B99D73]">Your shop details</p>
+                  <h3 className="mb-0 text-base font-bold text-[#F5F3EF]">One profile, easier connections</h3>
                 </div>
-                <p className="mb-0 text-sm leading-relaxed text-[#F5F3EF]/65">Your market, address, category, contact number, and photo help people identify your shop. You can update these details as your business changes.</p>
               </div>
-            </aside>
-          </section>
-        </div>
+              <p className="mb-0 text-sm leading-relaxed text-[#F5F3EF]/65">Your market, address, category, contact number, and photo help people identify your shop. You can update these details as your business changes.</p>
+            </div>
+          </aside>
+        </section>
+      </div>
     </div>
   );
 }
