@@ -13,6 +13,7 @@ Sahalak connects local market businesses with people looking for flexible work. 
 | Authentication | Auth.js / NextAuth v5 beta: GitHub OAuth, email and password, JWT sessions |
 | Database | PostgreSQL (hosted on Supabase), accessed with the `postgres` library and plain SQL |
 | Validation | Zod 4, shared by the browser and the server for the shop form |
+| Image storage | Supabase Storage, public `shop-images` bucket for shop logos and photos |
 | Email | Resend API for signup verification codes |
 | Security helpers | Node.js `crypto`: scrypt password hashing, HMAC-based OTP digests |
 
@@ -40,7 +41,21 @@ The project enables Next.js `cacheComponents`. The owner setup page keeps its st
 - Fields: shop name, market, address, category, contact number, and a shop image or logo.
 - One Zod schema validates the form in the browser and on the server. The API also checks the uploaded file signature and accepts JPG, PNG or WebP images up to 2 MB.
 - `POST /api/owner/shop` requires a signed-in account. In a single database transaction it activates the owner role and saves (or updates) the shop.
+- The shop image is uploaded to Supabase Storage first; the transaction stores its public URL and bucket path. If the database write fails, the newly uploaded image is removed.
 - Each owner currently has one shop profile. Submitting again updates it.
+
+## Shop setup errors and fixes
+
+These issues were found while saving the owner shop profile:
+
+| Problem | Cause | Fix |
+|---|---|---|
+| Shop form returned a generic internal server error when image storage failed | The API looked for a `STORAGE_UPLOAD_FAILED` marker, while the storage helper threw an `Image upload failed` message, so the error fell through to the generic 500 handler. | Storage failures now use a typed error. The API returns a specific configuration response or an upload failure response and logs the failure category. |
+| `Bucket not found` and `POST /api/owner/shop` returned 502 | The Supabase project did not have the required `shop-images` bucket. | Run `node --env-file=.env.local script/ensure-shop-image-bucket.mjs`. It creates or updates the public bucket for JPG, PNG, and WebP files up to 2 MB, then verifies upload and deletion with a temporary probe image. |
+| Next.js warned that image quality 72 was not configured | Next Image quality values must be included in `images.qualities`. The app uses qualities 72, 75, and 82. | `next.config.mjs` now allows `[72, 75, 82]`. Restart the Next.js server after changing this config. |
+| Shop save could fail if image-storage columns were absent from PostgreSQL | The Storage migration adds `image_url` and `image_path` to `shops`; older schemas may also still require the removed `image_data` column. | Apply `db/003-shop-image-storage.sql` to the Supabase database before saving. The API reports an outdated schema with a migration hint. |
+
+Verification completed: the bucket setup and temporary upload/delete probe passed, the owner-role/shop SQL path passed inside a transaction that was rolled back, and `npm run lint` plus `npm run build` passed. A full browser form submission still requires a signed-in test session.
 
 ### Protected routes
 The root `proxy.js` redirects signed-out visitors to the login role-choice page when they visit `/owner/setup`, `/dashboard/*`, `/owner/dashboard/*`, or `/worker/dashboard/*`.
@@ -60,12 +75,17 @@ The root `proxy.js` redirects signed-out visitors to the login role-choice page 
    ```
 2. Create a Supabase project, open the SQL Editor, paste the contents of `db/schema.sql`, and run it.
 3. Create `.env.local` in the project root (see the next section). Do not commit it.
-4. Check the database connection:
+4. Run the shop-image database migration `db/003-shop-image-storage.sql` in the Supabase SQL Editor.
+5. Create and verify the Storage bucket:
+   ```bash
+   node --env-file=.env.local script/ensure-shop-image-bucket.mjs
+   ```
+6. Check the database connection:
    ```bash
    node --env-file=.env.local script/test-db.mjs
    ```
    It should print the database name and the list of tables.
-5. Start the development server:
+7. Start the development server:
    ```bash
    npm run dev
    ```
@@ -99,6 +119,7 @@ The OTP endpoint returns a setup error if `RESEND_API_KEY` or `EMAIL_FROM` is mi
 | `npm run build` | Create a production build |
 | `npm start` | Run the production build |
 | `node --env-file=.env.local script/test-db.mjs` | Check the database connection and list tables |
+| `node --env-file=.env.local script/ensure-shop-image-bucket.mjs` | Create or align the shop image bucket and verify upload/delete access |
 
 ## Database
 
@@ -108,13 +129,13 @@ The schema lives in `db/schema.sql`. Tables:
 |---|---|
 | `users` | Name, email, password hash (null for GitHub-only accounts), role (`user` or `owner`), email verification time, owner activation time |
 | `pending_signups` | Temporary signup data and the OTP digest, with an expiry time and an attempt counter |
-| `shops` | One shop per owner: owner, shop details, and the image |
+| `shops` | One shop per owner: owner, shop details, and Supabase Storage image metadata |
 
 Notes:
 - The `postgres` client in `src/app/lib/db/index.js` converts snake_case columns to camelCase in JavaScript (`password_hash` becomes `passwordHash`).
 - PostgreSQL does not delete expired rows automatically. The request-OTP route removes expired pending signups each time it runs.
 - GitHub sign-ins get a `users` row the first time they save a shop.
-- Shop images are currently stored as `bytea` in the `shops` table. Before building shop listing pages, move them to object storage (for example Supabase Storage) and keep only the URL in the table.
+- Shop images are stored in Supabase Storage; the `shops` table stores the public URL, bucket path, content type, file name, and size.
 - Schema changes go into new numbered files in `db/` (for example `db/002-markets.sql`) so the database can always be rebuilt in order.
 
 ## Main routes and API
@@ -140,6 +161,7 @@ db/
   schema.sql                 Database tables
 script/
   test-db.mjs                Database connection check
+  ensure-shop-image-bucket.mjs Provision and verify shop image storage
 public/
   market.webp                Market photo used by the signup and setup pages
 proxy.js                     Protected route redirects
@@ -167,17 +189,16 @@ src/app/
 
 ## Known limitations
 - Each owner can have one shop.
-- Shop images are stored in the database for now.
-- Authorization is checked only for session presence and the route redirects. Role and ownership checks inside each API route and page still need to be added as features grow.
+- Shop image delivery uses a public Supabase Storage bucket; keep its service key server-side only.
+- The owner shop API checks the signed-in user's role from PostgreSQL. Add role and ownership checks to future protected APIs and pages as they are implemented.
 - There is no admin role yet, so shops are not reviewed before they could be shown publicly.
 - The dashboard is a placeholder.
 
 ## Roadmap
 
-1. Housekeeping: database id for GitHub sessions, admin role, shop images in object storage.
-2. Market directory data model: area, market, zone, lane, stall and category tables, with seed data for the first market.
-3. Public market page with shop list, filters and search.
-4. Interactive market map with clickable stalls.
-5. Admin layout editor and lane-based directions to a shop.
-6. Owner dashboard: edit shop, catalog items, open or closed today, offers.
-7. Gig staffing: worker verification (18 or above), shift posting, applications, check-in, payment confirmation and ratings.
+1. Market directory data model: area, market, zone, lane, stall and category tables, with seed data for the first market.
+2. Public market page with shop list, filters and search.
+3. Interactive market map with clickable stalls.
+4. Admin layout editor and lane-based directions to a shop.
+5. Owner dashboard: edit shop, catalog items, open or closed today, offers.
+6. Gig staffing: worker verification (18 or above), shift posting, applications, check-in, payment confirmation and ratings.
