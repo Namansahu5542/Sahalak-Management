@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import { sql } from "@/app/lib/db";
 import { hashPassword } from "@/app/lib/auth/password";
 import { createOtp, digestOtp } from "@/app/lib/auth/otp";
+import { checkRateLimit, getClientIp, rateLimitKey, tooManyRequests } from "@/app/lib/rate-limit";
+
+// Tune these. The global cap should sit just under your Resend plan's daily email quota.
+const LIMITS = {
+  ip: { limit: 10, windowSeconds: 10 * 60 },
+  email: { limit: 5, windowSeconds: 60 * 60 },
+  global: { limit: Number(process.env.OTP_DAILY_EMAIL_LIMIT) || 100, windowSeconds: 24 * 60 * 60 },
+};
 
 function validOrigin(request) {
   const origin = request.headers.get("origin");
@@ -14,6 +22,15 @@ function validOrigin(request) {
 
 export async function POST(request) {
   if (!validOrigin(request)) return NextResponse.json({ error: "Request could not be verified." }, { status: 403 });
+
+  // RATE LIMIT 1/3: per IP. Runs before parsing, hashing or any DB work, so floods stay cheap.
+  try {
+    const ipLimit = await checkRateLimit({ key: rateLimitKey("otp-ip", getClientIp(request)), ...LIMITS.ip });
+    if (!ipLimit.allowed) return tooManyRequests(ipLimit.retryAfterSeconds);
+  } catch (error) {
+    console.error("Rate limit check failed", { name: error?.name, code: error?.code });
+    return NextResponse.json({ error: "Signup is temporarily unavailable. Please try again." }, { status: 503 });
+  }
 
   let input;
   try {
@@ -31,6 +48,15 @@ export async function POST(request) {
   const role = input.role === "owner" ? "owner" : input.role === "user" || input.role === undefined ? "user" : null;
   if (!role || name.length < 2 || name.length > 80 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || password.length < 10 || password.length > 128) {
     return NextResponse.json({ error: "Use a valid name and email, and a password of at least 10 characters." }, { status: 400 });
+  }
+
+  // RATE LIMIT 2/3: per email address, so one victim cannot be mail-bombed from many IPs.
+  try {
+    const emailLimit = await checkRateLimit({ key: rateLimitKey("otp-email", email), ...LIMITS.email });
+    if (!emailLimit.allowed) return tooManyRequests(emailLimit.retryAfterSeconds);
+  } catch (error) {
+    console.error("Rate limit check failed", { name: error?.name, code: error?.code });
+    return NextResponse.json({ error: "Signup is temporarily unavailable. Please try again." }, { status: 503 });
   }
 
   const resendKey = process.env.RESEND_API_KEY;
@@ -52,6 +78,11 @@ export async function POST(request) {
     if (previous && Date.now() - previous.updatedAt.getTime() < 60_000) {
       return NextResponse.json({ error: "Please wait a minute before requesting another code." }, { status: 429 });
     }
+
+    // RATE LIMIT 3/3: global daily cap on real emails. Checked last, so requests rejected
+    // above (existing account, cooldown) never use up the shared email budget.
+    const globalLimit = await checkRateLimit({ key: "otp-global", ...LIMITS.global });
+    if (!globalLimit.allowed) return tooManyRequests(globalLimit.retryAfterSeconds, "We are receiving a lot of signups right now.");
 
     const otp = createOtp();
     const now = new Date();
