@@ -24,17 +24,20 @@ export async function getMarketBySlug(slug, { includeDraft = false } = {}) {
   return market ?? null;
 }
 
-/** Every stall of a market with its location and whether a shop already holds it. */
-export async function getMarketStalls(marketId) {
+/** Every selectable stall, with the current owner's stall still selectable on edits. */
+export async function getMarketStalls(marketId, { ownerId = null } = {}) {
   return sql`
     select s.id, s.stall_no, s.side,
            l.id as lane_id, l.name as lane_name,
            z.id as zone_id, z.name as zone_name,
-           (ss.shop_id is not null) as taken
+           (ss.shop_id is not null and sh.owner_id is distinct from ${ownerId}::uuid) as taken,
+           coalesce(sh.owner_id = ${ownerId}::uuid, false) as is_mine
     from stalls s
+    join markets m on m.id = s.market_id and m.status in ('draft', 'active')
     join lanes l on l.id = s.lane_id
     left join zones z on z.id = l.zone_id
     left join shop_stalls ss on ss.stall_id = s.id
+    left join shops sh on sh.id = ss.shop_id
     where s.market_id = ${marketId}
     order by z.sort_order nulls last, l.sort_order,
              nullif(regexp_replace(s.stall_no, '\\D', '', 'g'), '')::int nulls last, s.stall_no`;

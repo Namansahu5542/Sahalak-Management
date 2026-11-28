@@ -1,204 +1,215 @@
 # Sahalak
 
-Sahalak connects local market businesses with people looking for flexible work. Businesses can find help for a short shift or a longer role, customers can explore local shops, and regular users can activate a worker profile when that experience is built out.
+Sahalak is being built to connect local market businesses with people who can work short or longer periods. Shops will be discoverable by market location, and regular users can activate a worker profile as that feature is developed.
 
-> Status: in active development. The landing page, authentication and owner shop setup are working. The market directory, map and staffing features are planned (see the roadmap).
+> **Current status:** The animated landing page, role choice, GitHub and email/password authentication, OTP signup verification, owner business setup, market/stall/category data model, and shop-image storage are implemented. The owner setup flow uses the market model. Public market browsing, the interactive market map, worker shifts, and complete owner/worker dashboards are not implemented yet.
 
-## Tech stack
+## Technology
 
 | Area | Technology |
 |---|---|
-| Framework | Next.js 16 (App Router) with React 19 |
-| Styling | Tailwind CSS 4 |
-| Authentication | Auth.js / NextAuth v5 beta: GitHub OAuth, email and password, JWT sessions |
-| Database | PostgreSQL (hosted on Supabase), accessed with the `postgres` library and plain SQL |
-| Validation | Zod 4, shared by the browser and the server for the shop form |
-| Image storage | Supabase Storage, public `shop-images` bucket for shop logos and photos |
-| Email | Resend API for signup verification codes |
-| Security helpers | Node.js `crypto`: scrypt password hashing, HMAC-based OTP digests |
+| Web framework | Next.js 16.4.6 App Router, React 19 |
+| Styling and animation | Tailwind CSS 4, CSS/SVG animations, reduced-motion support |
+| Authentication | Auth.js / NextAuth v5 beta, GitHub OAuth, email/password credentials, JWT sessions |
+| Relational data | Supabase-hosted PostgreSQL, `postgres` tagged SQL client |
+| Shop photos | Supabase Storage public bucket `shop-images` |
+| Validation | Zod 4, shared shop form schema on browser and server |
+| Verification email | Resend API |
+| Password and OTP security | Node `crypto`, scrypt password hashes, HMAC OTP digests |
 
-The project enables Next.js `cacheComponents`. The owner setup page keeps its static header and background outside a `Suspense` boundary and streams the session-dependent content inside it.
+Next.js `cacheComponents` is enabled. Request-dependent authentication/data must follow the existing streaming and `Suspense` patterns. Before using an unfamiliar Next.js API, read the relevant guide in `node_modules/next/dist/docs/`; the generated rules in `AGENTS.md` also require this.
 
-## Implemented so far
+## What is implemented
 
 ### Landing page
-- Responsive landing page for connecting businesses with workers for short and long periods.
-- Animated market journey: the path draws as the visitor scrolls, nearby shops light up, and a person follows the route to the destination.
-- Reduced-motion handling for visitors who prefer less animation.
-- Calls to action for home, business, worker, and sign-in or sign-up.
 
-### Sign-in and signup
-- Role selection offers two account types: owner and user.
-- Signup is available at `/signup?role=user` or `/signup?role=owner`.
-- Email and password signup collects a name and verifies the email before creating the account.
-- Verification codes are 8 digits, expire after 10 minutes, allow up to 5 attempts, and have a 60-second resend cooldown.
-- Passwords are stored as scrypt hashes. OTPs are stored as keyed digests, never as the original code.
-- Signup can also continue with GitHub OAuth.
-- Credentials and GitHub sign-in both use JWT sessions through Auth.js.
+- Responsive Sahalak landing page centered on helping local businesses find workers for short and longer periods.
+- Scroll-driven market journey: route draws, nearby stalls light up, and an animated person follows the path.
+- Reduced-motion handling for people who prefer less animation.
+- Header, calls to action, and footer.
+
+### Signup and login
+
+- Users choose one of two account experiences: **owner** or **user**. A regular user may become an owner by completing shop setup.
+- Signup routes: `/signup?role=user` and `/signup?role=owner`.
+- GitHub OAuth and email/password credentials are supported. GitHub email must be verified. The first successful GitHub sign-in upserts/links a row in `users`; credentials sign-in looks up an already verified user. Auth.js sessions use JWTs with the database user ID.
+- Email signup requests an 8-digit verification code through Resend. The pending signup stores the scrypt password hash and an HMAC OTP digest, not the plaintext code.
+- Codes expire after 10 minutes, allow up to 5 verification attempts, and are subject to a 60-second resend cooldown.
+- `POST /api/signup/request-otp` is rate-limited by IP (10 requests/10 minutes), email (5/hour), and a global daily cap (`OTP_DAILY_EMAIL_LIMIT`, default 100). IP/email keys are HMACed using `AUTH_SECRET`; raw identifiers are not stored in `rate_limits`.
 
 ### Owner shop setup
-- `/owner/setup` provides the business setup form with a market-route animation.
-- Fields: shop name, market, address, category, contact number, and a shop image or logo.
-- One Zod schema validates the form in the browser and on the server. The API also checks the uploaded file signature and accepts JPG, PNG or WebP images up to 2 MB.
-- `POST /api/owner/shop` requires a signed-in account. In a single database transaction it activates the owner role and saves (or updates) the shop.
-- The shop image is uploaded to Supabase Storage first; the transaction stores its public URL and bucket path. If the database write fails, the newly uploaded image is removed.
-- Each owner currently has one shop profile. Submitting again updates it.
 
-## Shop setup errors and fixes
+- `/owner/setup` has a responsive two-column form and information/animation panel with the market photo background.
+- Fields: shop name, market, lane/stall, address or landmark, contact phone, up to 3 categories, and a shop photo/logo.
+- Markets and categories are loaded on the server. When a market is selected, `GET /api/owner/shop/options?marketId=...` loads its stalls. Stalls claimed by another shop are disabled; an owner's currently claimed stall remains selectable while editing.
+- Shared Zod validation handles UUIDs, required fields, phone format, category count, and image file size/type. `shopFormToObject()` uses `FormData.getAll("categoryIds")` so multiple checked categories are not lost.
+- The API checks the actual uploaded image signature as well as MIME type, accepts JPG/PNG/WebP, and enforces a 2 MB maximum.
+- Image upload happens before the database transaction. The transaction verifies market/stall/category IDs again, changes the user's role to `owner`, upserts the shop, claims the stall, and replaces category links. The unique stall constraint resolves simultaneous claims. On a failed save the new image is removed; after a successful replacement the old image is removed.
+- New shops are `pending` review. Public search helpers only return `verified` shops in active markets. A changed market/stall or rejected-shop resubmission returns to `pending`.
+- The API upserts one shop per owner, but the current setup page does not yet load existing shop values into the form for editing.
 
-These issues were found while saving the owner shop profile:
+### Market data foundation
 
-| Problem | Cause | Fix |
-|---|---|---|
-| Shop form returned a generic internal server error when image storage failed | The API looked for a `STORAGE_UPLOAD_FAILED` marker, while the storage helper threw an `Image upload failed` message, so the error fell through to the generic 500 handler. | Storage failures now use a typed error. The API returns a specific configuration response or an upload failure response and logs the failure category. |
-| `Bucket not found` and `POST /api/owner/shop` returned 502 | The Supabase project did not have the required `shop-images` bucket. | Run `node --env-file=.env.local script/ensure-shop-image-bucket.mjs`. It creates or updates the public bucket for JPG, PNG, and WebP files up to 2 MB, then verifies upload and deletion with a temporary probe image. |
-| Next.js warned that image quality 72 was not configured | Next Image quality values must be included in `images.qualities`. The app uses qualities 72, 75, and 82. | `next.config.mjs` now allows `[72, 75, 82]`. Restart the Next.js server after changing this config. |
-| Shop save could fail if image-storage columns were absent from PostgreSQL | The Storage migration adds `image_url` and `image_path` to `shops`; older schemas may also still require the removed `image_data` column. | Apply `db/003-shop-image-storage.sql` to the Supabase database before saving. The API reports an outdated schema with a migration hint. |
+`db/006-market.sql` defines:
 
-Verification completed: the bucket setup and temporary upload/delete probe passed, the owner-role/shop SQL path passed inside a transaction that was rolled back, and `npm run lint` plus `npm run build` passed. A full browser form submission still requires a signed-in test session.
+```text
+areas → markets → zones → lanes → stalls
+                       categories
+shops ↔ shop_stalls ↔ stalls
+shops ↔ shop_categories ↔ categories
+```
 
-### Protected routes
-The root `proxy.js` redirects signed-out visitors to the login role-choice page when they visit `/owner/setup`, `/dashboard/*`, `/owner/dashboard/*`, or `/worker/dashboard/*`.
+- Markets have `draft`, `active`, or `archived` status. Shops have `pending`, `verified`, or `rejected` status.
+- Categories form a parent/child tree. Existing category values are migrated into the `categories` and `shop_categories` tables.
+- `src/app/lib/markets.js` contains server-only, parameterized queries for markets, stalls, categories, and verified shop search/filtering. Owner setup currently uses the market, category, and stall functions. Public market browsing does not yet call the public search query.
+- `db/seed/para-market.sql` is a **placeholder** Rajajipuram/Para Market layout: 2 zones, 4 lanes, and 12 numbered stalls per lane (48 total). It is draft data, not verified survey information.
 
-## Getting started
+## Authentication and route protection
+
+- `src/app/lib/auth/auth.js` configures GitHub and credentials auth, links sessions to database user IDs, and refreshes role claims after owner activation.
+- `src/app/lib/auth/password.js` and `otp.js` implement password hashing and OTP helpers.
+- `src/app/lib/auth/require-role.js` checks the current role from PostgreSQL. Use `requireRole()` for protected server pages and `withRole()` for route handlers; the latter returns JSON 401/403 responses.
+- Root `proxy.js` redirects signed-out users away from `/owner/setup`, `/dashboard/*`, `/owner/dashboard/*`, and `/worker/dashboard/*`. This is a navigation redirect; sensitive APIs and pages must still enforce authorization themselves.
+- Normal roles are `user` and `owner`. The optional `admin` role is added by `db/002-admin-role.sql` and must only be assigned manually; no public signup/API should grant it.
+
+## Database migrations and data safety
+
+Start with `db/schema.sql`, then apply migrations in order when their feature is needed:
+
+| File | Purpose / requirement |
+|---|---|
+| `db/schema.sql` | Base `users`, `pending_signups`, and `shops` tables, extensions, and initial constraints. |
+| `db/002-admin-role.sql` | Optional role constraint change for manually managed admins. |
+| `db/003-shop-image-storage.sql` | Required for shop uploads: adds `image_url`/`image_path` and makes legacy `image_data` nullable. |
+| `db/004-drop-shop-image-data.sql` | Destructive cleanup of legacy image bytes. Run only after `script/migrate-shop-images.mjs` has copied all existing images to Storage; it includes a guard but still drops the column. |
+| `db/005-rate-limit.sql` | Required for OTP request throttling; creates the RLS-protected `rate_limits` table. |
+| `db/006-market.sql` | Required for current market-based owner setup. Depends on base schema and migration 003; creates market/category/location tables and enables RLS on those tables. |
+| `db/seed/para-market.sql` | Optional placeholder data; run after migration 006. |
+| `db/enable-rls.sql` | Separate guarded step to enable RLS on base account/shop tables. Its guard requires the executing DB role to bypass RLS or be superuser. Do not bypass/remove that guard casually. |
+
+The live development database was checked during this update: it contained the market tables, 1 available draft/active market, 8 categories, and 48 stalls. Local SQL files do not prove that another database or deployment has had the migrations applied.
+
+The `postgres` client in `src/app/lib/db/index.js` uses TLS, disables prepared statements, and applies `postgres.camel` to result column names (`shop_name` becomes `shopName`). SQL identifiers remain snake_case. Always use parameterized tagged SQL.
+
+## Supabase Storage
+
+- Bucket name: `shop-images`.
+- Bucket is public so its `getPublicUrl()` image URLs can be rendered without signed URLs. Upload/delete use a server-side service key only.
+- Accepted file types are `image/jpeg`, `image/png`, and `image/webp`; bucket and form limits are 2 MB.
+- Server helper: `src/app/lib/storage/shop-images.js`.
+- Provision or align the bucket and verify upload/delete using:
+
+  ```bash
+  node --env-file=.env.local script/ensure-shop-image-bucket.mjs
+  ```
+
+- For legacy database images, create/verify the bucket, run `node --env-file=.env.local script/migrate-shop-images.mjs`, verify migration results, then consider migration 004.
+- `next.config.mjs` derives the remote image hostname from `SUPABASE_URL` and allows Next Image qualities `[72, 75, 82]`. Add any newly used quality to `images.qualities` and restart the server after changing Next config.
+
+## Setup and environment
 
 ### Prerequisites
-- Node.js 20.6 or later (the test script uses `--env-file`)
-- A PostgreSQL database. The project is set up for Supabase (a free project works for development)
-- A Resend account with a verified sending address, for verification emails
-- A GitHub OAuth app, if you want GitHub sign-in
 
-### Setup
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Create a Supabase project, open the SQL Editor, paste the contents of `db/schema.sql`, and run it.
-3. Create `.env.local` in the project root (see the next section). Do not commit it.
-4. Run the shop-image database migration `db/003-shop-image-storage.sql` in the Supabase SQL Editor.
-5. Create and verify the Storage bucket:
-   ```bash
-   node --env-file=.env.local script/ensure-shop-image-bucket.mjs
-   ```
-6. Check the database connection:
-   ```bash
-   node --env-file=.env.local script/test-db.mjs
-   ```
-   It should print the database name and the list of tables.
-7. Start the development server:
-   ```bash
-   npm run dev
-   ```
-   Open http://localhost:3000.
+- Node.js 20.6 or later (`--env-file` is used by utility commands).
+- Supabase project with PostgreSQL and Storage.
+- Resend account and a verified sender address for signup email.
+- GitHub OAuth app if GitHub sign-in is needed.
 
-## Environment variables
+### Local setup
 
-Copy `.env.example` to `.env.local` and fill in the values. Never expose these in client-side code.
+1. Install dependencies: `npm install`.
+2. Create `.env.local` in the project root. Never commit it or print its values.
+3. Apply `db/schema.sql` and the required migrations above using Supabase SQL Editor.
+4. Configure the bucket with `node --env-file=.env.local script/ensure-shop-image-bucket.mjs`.
+5. Check database connectivity with `node --env-file=.env.local script/test-db.mjs`.
+6. Start the app with `npm run dev` and open `http://localhost:3000`.
 
-| Variable | Purpose |
+### Environment variable names
+
+| Name | Use |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection string. For local development use the Supabase session pooler string. For serverless hosting (for example Vercel) use the transaction pooler string |
-| `AUTH_SECRET` | Long random secret used by Auth.js and to key OTP digests |
-| `GITHUB_CLIENT_ID` | GitHub OAuth app client ID |
-| `GITHUB_SECRET` | GitHub OAuth app client secret |
-| `RESEND_API_KEY` | Resend API key for sending verification codes |
-| `EMAIL_FROM` | Sender address, for example `Sahalak <verify@your-verified-domain.com>` |
+| `DATABASE_URL` | PostgreSQL connection URL. Use a session pooler locally and a transaction pooler for serverless deployment; special password characters must be URL-encoded. |
+| `AUTH_SECRET` | Auth.js signing secret and HMAC key for OTP/rate-limit identifiers. |
+| `GITHUB_CLIENT_ID`, `GITHUB_SECRET` | GitHub OAuth credentials. Local callback example: `http://localhost:3000/api/auth/callback/github`. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Signup verification email. |
+| `SUPABASE_URL` | Supabase project URL; also supplies the remote image hostname. |
+| `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY` | Server-side Storage admin key. Never expose to the browser. |
+| `OTP_DAILY_EMAIL_LIMIT` | Optional global signup email cap; defaults to 100/day. |
 
-If your database password contains special characters such as `@`, `#`, `/` or `:`, URL-encode them in `DATABASE_URL`.
+## Scripts and verification
 
-For GitHub OAuth, set the app's callback URL to the Auth.js endpoint for your environment, for example `http://localhost:3000/api/auth/callback/github` locally.
-
-The OTP endpoint returns a setup error if `RESEND_API_KEY` or `EMAIL_FROM` is missing.
-
-## Scripts
-
-| Command | What it does |
+| Command | Purpose |
 |---|---|
-| `npm run dev` | Start the development server |
-| `npm run lint` | Run the linter |
-| `npm run build` | Create a production build |
-| `npm start` | Run the production build |
-| `node --env-file=.env.local script/test-db.mjs` | Check the database connection and list tables |
-| `node --env-file=.env.local script/ensure-shop-image-bucket.mjs` | Create or align the shop image bucket and verify upload/delete access |
+| `npm run dev` | Start the Next.js development server. |
+| `npm run lint` | Run ESLint. |
+| `npm run build` | Create a production build. Google Fonts referenced by `next/font` must be reachable during a clean build. |
+| `npm start` | Run a production build. |
+| `node --env-file=.env.local script/test-db.mjs` | Connect to PostgreSQL and list public tables. |
+| `node --env-file=.env.local script/ensure-shop-image-bucket.mjs` | Create/align the image bucket and test a temporary upload/delete. |
+| `node --env-file=.env.local script/migrate-shop-images.mjs` | Backfill legacy shop images to Storage before dropping `image_data`. |
 
-## Database
+There is no automated test framework configured. During the recent owner setup update, `npm run lint` passed with one existing warning in `src/app/lib/auth/auth.config.js`; `npm run build` passed after network access to Google Fonts was available. A database smoke check verified the market data tables/seed counts. A full browser form submission requires a signed-in test account.
 
-The schema lives in `db/schema.sql`. Tables:
+## Troubleshooting history
 
-| Table | Purpose |
+| Symptom | Root cause | Resolution |
+|---|---|---|
+| Owner setup showed a blocking-prerender warning at `auth()` | Request-bound session reads were mixed with a route being prerendered while `cacheComponents` was enabled. | Keep session reads in a streamed child under `Suspense`; call `connection()` before request-dependent work, as in `src/app/owner/setup/page.js`. |
+| Next build rejected a route `runtime` setting | The project has `cacheComponents`, which is incompatible with that route-segment setting. | Remove the incompatible `runtime` export; keep the handler on the supported default Node runtime. |
+| Shop submit returned generic 500 for storage failures | The API expected a `STORAGE_UPLOAD_FAILED` prefix but the helper threw a different message. | Use typed `ShopImageStorageError` instances and map configuration/upload errors to safe, actionable 503/502 responses. |
+| Shop image save returned `Bucket not found` / 502 | The required `shop-images` bucket did not exist in Supabase. | Create/align it with the setup script; the script verifies a temporary upload and delete. |
+| Next Image warned that quality 72 was not configured | `next/image` quality values must be allowlisted in config. | Configure `[72, 75, 82]` in `images.qualities`. |
+| Shop save failed against an old DB schema | The shop-image and market flows depend on `image_url`, `image_path`, `market_id`, and market/category relation tables. | Apply migrations 003 and 006. The shop API responds with a schema hint for missing table/column errors. |
+| Owner form dropped all but one selected category | `Object.fromEntries(FormData.entries())` keeps only one value for a repeated key. | Use `shopFormToObject()` and `formData.getAll("categoryIds")`; validate and save up to three category IDs. |
+| Build failed fetching Geist fonts | `next/font/google` fetches Google Fonts at build time; restricted/offline network prevented the request. | Restore build-time access or self-host fonts if the deployment environment cannot access Google Fonts. |
+| An image hostname in Next config contained a database connection string | The wrong value was used as `images.remotePatterns.hostname`. | Derive the host from `SUPABASE_URL`. If the connection string was shared or committed, rotate its database password. |
+
+## Routes
+
+| Route | Purpose |
 |---|---|
-| `users` | Name, email, password hash (null for GitHub-only accounts), role (`user` or `owner`), email verification time, owner activation time |
-| `pending_signups` | Temporary signup data and the OTP digest, with an expiry time and an attempt counter |
-| `shops` | One shop per owner: owner, shop details, and Supabase Storage image metadata |
+| `/` | Animated landing page. |
+| `/choose-role/signup`, `/choose-role/login` | Owner/user choice. |
+| `/signup?role=user`, `/signup?role=owner` | Signup form. |
+| `/login` | Login form. |
+| `/owner/setup` | Authenticated business profile setup. |
+| `/dashboard/Home` | Dashboard placeholder. |
+| `POST /api/signup/request-otp` | Validate, rate-limit, stage signup, send OTP. |
+| `POST /api/signup/verify-otp` | Verify OTP and create the account. |
+| `POST /api/owner/shop` | Validate and save shop, stall, categories, owner role, and image metadata. |
+| `GET /api/owner/shop/options?marketId=...` | Authenticated market stall options for owner setup. |
+| `/api/auth/[...nextauth]` | Auth.js handlers. |
 
-Notes:
-- The `postgres` client in `src/app/lib/db/index.js` converts snake_case columns to camelCase in JavaScript (`password_hash` becomes `passwordHash`).
-- PostgreSQL does not delete expired rows automatically. The request-OTP route removes expired pending signups each time it runs.
-- GitHub sign-ins get a `users` row the first time they save a shop.
-- Shop images are stored in Supabase Storage; the `shops` table stores the public URL, bucket path, content type, file name, and size.
-- Schema changes go into new numbered files in `db/` (for example `db/002-markets.sql`) so the database can always be rebuilt in order.
+## Project layout
 
-## Main routes and API
-
-| Path | Purpose |
-|---|---|
-| `/` | Landing page |
-| `/choose-role/signup` | Choose an account type before signup |
-| `/choose-role/login` | Choose an account type before login |
-| `/signup?role=user` | Customer or worker-capable user signup |
-| `/signup?role=owner` | Owner signup, followed by shop setup |
-| `/owner/setup` | Owner shop profile setup |
-| `/dashboard/Home` | Dashboard route (currently a placeholder) |
-| `/api/auth/[...nextauth]` | Auth.js handlers |
-| `POST /api/signup/request-otp` | Create or update a pending signup and email a code |
-| `POST /api/signup/verify-otp` | Verify the code and create the account |
-| `POST /api/owner/shop` | Validate and save shop details |
-
-## Project structure
-
-```
-db/
-  schema.sql                 Database tables
-script/
-  test-db.mjs                Database connection check
-  ensure-shop-image-bucket.mjs Provision and verify shop image storage
-public/
-  market.webp                Market photo used by the signup and setup pages
-proxy.js                     Protected route redirects
+```text
+db/                         Base schema and ordered SQL migrations
+db/seed/                    Placeholder market seed data
+script/                     Database/Storage setup and migration utilities
+public/                     Market background and static assets
+proxy.js                    Signed-out route redirects
 src/app/
-  api/
-    auth/[...nextauth]/      Auth.js route handlers
-    owner/shop/              Shop setup API
-    signup/                  request-otp and verify-otp APIs
-  choose-role/               Login and signup role choices
-  components/                Landing, signup, animation and shop form UI
+  api/auth/                  Auth.js route handler
+  api/signup/                OTP request/verification endpoints
+  api/owner/shop/            Shop save and stall options endpoints
+  choose-role/               Login/signup role selection pages
+  components/                Landing, auth, owner form, and animation components
   dashboard/Home/            Dashboard placeholder
-  lib/
-    auth/                    Auth.js config, password and OTP helpers
-    db/                      PostgreSQL client
-    validation/              Shared Zod shop form schema
-  owner/setup/               Owner business setup page
-  signup/                    Signup page
+  lib/auth/                  Auth.js config, OTP, password, and role helpers
+  lib/db/                    PostgreSQL client
+  lib/markets.js             Market/stall/category/public-shop queries
+  lib/rate-limit.js          OTP rate limiting
+  lib/shops/owner-shop.js    Owner shop validation and transactional persistence
+  lib/storage/               Supabase Storage helpers
+  lib/validation/            Shared shop form schema and FormData helpers
+  owner/setup/               Owner setup page
 ```
 
-## Security notes
-- Passwords are hashed with scrypt, and OTPs are stored only as keyed digests.
-- Signup and shop endpoints check that requests come from the same origin.
-- All database queries use parameters (never string concatenation).
-- Keep `.env.local` out of Git, and use the transaction pooler string on serverless hosting.
+## Remaining work
 
-## Known limitations
-- Each owner can have one shop.
-- Shop image delivery uses a public Supabase Storage bucket; keep its service key server-side only.
-- The owner shop API checks the signed-in user's role from PostgreSQL. Add role and ownership checks to future protected APIs and pages as they are implemented.
-- There is no admin role yet, so shops are not reviewed before they could be shown publicly.
-- The dashboard is a placeholder.
-
-## Roadmap
-
-1. Market directory data model: area, market, zone, lane, stall and category tables, with seed data for the first market.
-2. Public market page with shop list, filters and search.
-3. Interactive market map with clickable stalls.
-4. Admin layout editor and lane-based directions to a shop.
-5. Owner dashboard: edit shop, catalog items, open or closed today, offers.
-6. Gig staffing: worker verification (18 or above), shift posting, applications, check-in, payment confirmation and ratings.
+- Public market directory UI, search/filter page, and interactive map.
+- Replace placeholder market/stall data with verified survey data; activate a market only after its layout is confirmed.
+- Owner dashboard for editing shop profile, catalog, opening status, and offers.
+- Worker profile activation, age/identity verification, shift creation/applications, attendance/check-in, payments, and ratings.
+- Admin review interface for verifying/rejecting shops and activating markets.
+- Add automated tests for validation, role authorization, stall contention, image cleanup, and OTP limits.

@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { auth } from "@/app/lib/auth/auth";
 import { connection } from "next/server";
+import { getCategories, getMarkets } from "@/app/lib/markets";
 import OwnerSetupForm from "@/app/components/OwnerSetupForm";
 import SignupRouteAnimation from "@/app/components/SignupRouteAnimation";
 
@@ -68,6 +69,10 @@ async function OwnerSetupContent() {
   await connection();
   const session = await auth();
   if (!session?.user) redirect("/choose-role/login?callbackUrl=%2Fowner%2Fsetup");
+  const [markets, categories] = await Promise.all([
+    getMarkets({ includeDraft: true }),
+    getCategories(),
+  ]);
 
   return (
     <div className="relative z-10 px-4 py-7 sm:px-7 sm:py-10 lg:px-10 lg:py-12">
@@ -87,7 +92,7 @@ async function OwnerSetupContent() {
               <h2 className="mb-1 text-xl font-bold tracking-[-.035em] text-[#F5F3EF] sm:text-2xl">Tell us about your shop</h2>
               <p className="mb-0 text-sm text-[#F5F3EF]/55">This information helps nearby people recognize your business and reach you.</p>
             </div>
-            <OwnerSetupForm />
+            <OwnerSetupForm markets={markets} categories={categories} />
           </div>
 
           <aside className="relative flex flex-col justify-between overflow-hidden border-t border-[#6C5636]/70 bg-[#6C5636]/10 p-5 sm:p-8 lg:border-l lg:border-t-0 lg:p-10 xl:p-12">
